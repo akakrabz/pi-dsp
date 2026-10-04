@@ -1,0 +1,10 @@
+# On Raspberry Pi OS prefer apt (see install.sh):
+#   sudo apt install python3-numpy python3-scipy python3-sounddevice python3-mido python3-rtmidi alsa-utils
+# This file is for pip/venv installs elsewhere (laptop development, other distros).
+numpy>=1.24
+scipy>=1.10
+sounddevice>=0.4.5     # needs the PortAudio library (apt: libportaudio2)
+mido>=1.2
+python-rtmidi>=1.4
+# optional, for tests/ui_check.py only:
+# playwright

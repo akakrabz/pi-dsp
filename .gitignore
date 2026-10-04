@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+data/presets/*.json
+data/padmap.json
+media/*.wav
+tests/shots/
