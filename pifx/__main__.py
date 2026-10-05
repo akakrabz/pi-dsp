@@ -112,6 +112,8 @@ def cmd_serve(args) -> int:
     print(f"\npifx {__version__}: engine on {rig.engine.device_name} "
           f"({rig.engine.sr} Hz, {rig.engine.blocksize} frames, "
           f"{1000 * rig.engine.blocksize / rig.engine.sr:.1f} ms per block)")
+    if rig.audio_note:
+        print(f"note: {rig.audio_note}")
     print(f"web UI: http://{_display_host(args.host)}:{args.port}/   (Ctrl-C to stop)")
 
     stop = {"flag": False}

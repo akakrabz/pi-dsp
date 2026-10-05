@@ -43,6 +43,11 @@ def test_pick_port_prefers_midi_over_daw():
              "Launchpad X:Launchpad X LPX MIDI 24:1"]
     assert lp.pick_port(names) == names[2]
     assert lp.pick_port(["Midi Through:Midi Through Port-0 14:0"]) is None
+    # ALSA truncates the port names on a real Pi: "DA" / "MI"
+    names = ["Launchpad Mini MK3:Launchpad Mini MK3 LPMiniMK3 DA 24:0",
+             "Launchpad Mini MK3:Launchpad Mini MK3 LPMiniMK3 MI 24:1"]
+    assert lp.pick_port(names) == names[1]
+    assert lp.pick_port(["Launchpad MK2:Launchpad MK2 MIDI 1 20:0"]) == "Launchpad MK2:Launchpad MK2 MIDI 1 20:0"
 
 
 def test_mk3_layout_roundtrip():

@@ -53,13 +53,23 @@ def pick_port(names: list) -> Optional[str]:
     cands = [n for n in names if identify(n)]
     if not cands:
         return None
-    # MK3 devices expose "LPX DAW" and "LPX MIDI": we want the MIDI one.
+    # MK3 devices expose "LPX DAW" and "LPX MIDI": we want the MIDI one. ALSA
+    # truncates the names, so they arrive as "... LPMiniMK3 DA 24:0" / "... MI 24:1".
+    def is_daw(n: str) -> bool:
+        words = n.lower().replace(":", " ").split()
+        return any(w in ("daw", "da", "live", "d") for w in words) or "live port" in n.lower()
+
+    def is_midi(n: str) -> bool:
+        words = n.lower().replace(":", " ").split()
+        return any(w in ("midi", "mi", "m") for w in words)
+
     for n in cands:
-        low = n.lower()
-        if "daw" in low or "live port" in low:
-            continue
-        return n
-    return cands[0]
+        if is_midi(n) and not is_daw(n):
+            return n
+    for n in cands:
+        if not is_daw(n):
+            return n
+    return cands[-1]
 
 
 class Layout:

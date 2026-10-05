@@ -16,7 +16,7 @@ from typing import Callable, Optional
 from . import hat as hatmod
 from . import padmap
 from .dsp import Chain
-from .engine import Engine, find_hat_device
+from .engine import Engine, find_hat_device, hat_is_busy, pipewire_device, pipewire_set_default_sink
 from .sources import ToneSource, FileSource, Source, list_media, write_test_wav, WAVES, SHAPES
 
 log = logging.getLogger("pifx.rig")
@@ -64,14 +64,25 @@ class Rig:
 
     # ------------------------------------------------------------------ start
     def start(self, device=None, sim: bool = False) -> None:
+        self.audio_note = ""
         if device is None and not sim and self.hat.detected and self.hat.card:
-            device = find_hat_device(self.hat.card.id)
+            card = self.hat.card
+            device = find_hat_device(card.id)
+            if device is None and (self.hat.pipewire or self.hat.pulseaudio or hat_is_busy(card.id)):
+                # The desktop audio server owns the card: go through it instead.
+                sink = pipewire_set_default_sink(card.id) if self.hat.pipewire else None
+                device = pipewire_device()
+                if device is not None:
+                    self.audio_note = (f"routed through PipeWire (default sink: {sink or 'unchanged'}); "
+                                       f"for lowest latency run on Raspberry Pi OS Lite or stop PipeWire")
+                    log.warning("HAT is held by the desktop audio server; %s", self.audio_note)
             if device is None:
-                device = f"hw:{self.hat.card.index}"
+                device = f"hw:{card.index}"
         try:
             self.engine.start(device=device, sim=sim)
         except Exception as e:  # noqa: BLE001
             log.error("audio device failed (%s); falling back to simulation", e)
+            log.error("hint: python3 -m pifx devices   lists what PortAudio can open; try --device <name>")
             self.engine.start(sim=True)
             self.engine.device_name = f"simulation (audio failed: {e})"
         self._changed("status")
@@ -101,7 +112,7 @@ class Rig:
         return {
             "hat": self.hat.to_dict(),
             "hat_report": hatmod.format_report(self.hat),
-            "engine": self.engine.status(),
+            "engine": {**self.engine.status(), "note": getattr(self, "audio_note", "")},
             "uptime": round(time.time() - self.started),
         }
 

@@ -235,6 +235,60 @@ def find_hat_device(card_id: Optional[str]) -> Optional[int]:
     return None
 
 
+def hat_is_busy(card_id: str) -> bool:
+    """True when PortAudio sees the card but cannot open it (PipeWire/Pulse holds it)."""
+    try:
+        import sounddevice as sd
+        return any(card_id.lower() in d["name"].lower() and d["max_output_channels"] == 0
+                   for d in sd.query_devices())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def pipewire_device():
+    """PortAudio index of the 'pipewire' (or 'pulse'/'default') ALSA plugin, if present."""
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+    except Exception:  # noqa: BLE001
+        return None
+    for want in ("pipewire", "pulse", "default"):
+        for i, d in enumerate(devices):
+            if d["name"].lower() == want and d["max_output_channels"] > 0:
+                return i
+    return None
+
+
+def pipewire_set_default_sink(card_hint: str) -> Optional[str]:
+    """Make the HAT PipeWire's default sink with wpctl. Returns the sink name or None."""
+    import re
+    import shutil
+    import subprocess
+    if not shutil.which("wpctl"):
+        return None
+    try:
+        out = subprocess.run(["wpctl", "status"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    in_sinks = False
+    for line in out.splitlines():
+        if "Sinks:" in line:
+            in_sinks = True
+            continue
+        if in_sinks and ("Sources:" in line or "Filters:" in line or "Sink endpoints" in line):
+            in_sinks = False
+        if not in_sinks:
+            continue
+        m = re.search(r"(\d+)\.\s+(.*?)\s*\[", line)
+        if m and card_hint.lower().replace(" ", "") in m.group(2).lower().replace(" ", ""):
+            try:
+                subprocess.run(["wpctl", "set-default", m.group(1)], timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                return None
+            return m.group(2)
+    return None
+
+
 def list_devices() -> list:
     try:
         import sounddevice as sd

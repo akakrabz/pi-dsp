@@ -11,6 +11,8 @@ ExecStart=/usr/bin/python3 -m pifx serve --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+# only matters when routed through PipeWire (desktop image): ask for a small quantum
+Environment=PIPEWIRE_LATENCY=256/48000
 # low-latency audio: let PortAudio raise the callback thread priority
 LimitRTPRIO=95
 LimitMEMLOCK=infinity

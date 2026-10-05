@@ -531,6 +531,7 @@ function renderStatus() {
   $('load-txt').textContent = e.load !== undefined ? Math.round(e.load * 100) + '%' : '—';
   $('xrun-txt').textContent = e.xruns ? '· ' + e.xruns + ' dropouts' : '';
   $('xrun-txt').style.color = e.xruns ? 'var(--bad)' : '';
+  if (e.note) $('hat-txt').textContent += ' · ' + e.note.split(';')[0];
   if (status.hat_report) $('hat-report').textContent = status.hat_report + '\n\nengine: ' + JSON.stringify(e) + '\nlaunchpad: ' + JSON.stringify(lp);
 }
 function render() { if (!state) return; renderRack(); renderOutput(); renderSource(); renderPads(); renderPresets(); }
