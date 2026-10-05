@@ -107,8 +107,23 @@ class Engine:
             return
         if sim:
             self.backend = SimBackend(self)
+        elif isinstance(device, str) and device.startswith(("alsa:", "hw:", "plughw:")):
+            self.backend = AplayBackend(self, device.removeprefix("alsa:"))
         else:
-            self.backend = SoundDeviceBackend(self, device)
+            try:
+                self.backend = SoundDeviceBackend(self, device)
+                self.backend.start()
+            except Exception as e:  # noqa: BLE001
+                alsa = alsa_name_for(device)
+                if not alsa:
+                    raise
+                log.warning("PortAudio could not open %r (%s); using aplay on %s", device, e, alsa)
+                self.backend = AplayBackend(self, alsa)
+            else:
+                self.device_name = self.backend.name
+                self.running = True
+                log.info("engine running on %s @ %d Hz, %d frames", self.device_name, self.sr, self.blocksize)
+                return
         self.backend.start()
         self.device_name = self.backend.name
         self.running = True
@@ -163,6 +178,84 @@ class SimBackend(_Backend):
                 time.sleep(delay)
             else:
                 nxt = time.perf_counter()   # fell behind: resync instead of bursting
+
+
+class AplayBackend(_Backend):
+    """Pipe raw 32-bit samples into `aplay`. No PortAudio needed; aplay's blocking write paces us.
+
+    Uses plughw: so ALSA converts format if the card wants something other than S32_LE.
+    """
+
+    def __init__(self, engine: Engine, alsa_device: str):
+        self.e = engine
+        dev = alsa_device
+        if dev.startswith("hw:"):
+            dev = "plug" + dev
+        self.dev = dev
+        self.name = f"{dev} (aplay)"
+        self.proc = None
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, name="pifx-aplay", daemon=True)
+
+    def start(self):
+        import shutil
+        import subprocess
+        if not shutil.which("aplay"):
+            raise RuntimeError("aplay not found (sudo apt install alsa-utils)")
+        n = self.e.blocksize
+        self.proc = subprocess.Popen(
+            ["aplay", "-q", "-D", self.dev, "-t", "raw", "-f", "S32_LE", "-c", "2",
+             "-r", str(self.e.sr), f"--period-size={n}", f"--buffer-size={n * 4}"],
+            stdin=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+        # A default pipe holds 64 KiB (~170 ms of audio) before writes block. Shrink it
+        # to one page so knob moves are heard within ~10 ms, not ~200 ms.
+        try:
+            import fcntl
+            fcntl.fcntl(self.proc.stdin.fileno(), 1031, 4096)   # F_SETPIPE_SZ
+        except (ImportError, OSError):
+            pass
+        time.sleep(0.15)
+        if self.proc.poll() is not None:
+            err = self.proc.stderr.read().decode(errors="replace").strip()
+            raise RuntimeError(f"aplay failed on {self.dev}: {err or 'exit ' + str(self.proc.returncode)}")
+        self.thread.start()
+
+    def _run(self):
+        out = self.proc.stdin
+        while not self._stop.is_set():
+            y = self.e.process_block(self.e.blocksize)
+            data = (np.clip(y, -1.0, 1.0) * 2147483647.0).astype("<i4").tobytes()
+            try:
+                out.write(data)
+            except (BrokenPipeError, OSError):
+                err = self.proc.stderr.read().decode(errors="replace").strip() if self.proc.stderr else ""
+                log.error("aplay stopped: %s", err or "pipe closed")
+                self.e.xruns += 1
+                break
+
+    def stop(self):
+        self._stop.set()
+        if self.proc:
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=2)
+            except Exception:  # noqa: BLE001
+                self.proc.kill()
+        self.thread.join(timeout=2)
+
+
+def alsa_name_for(device) -> Optional[str]:
+    """Turn 'hw:1', 'BossDAC' or None (=the HAT) into an ALSA device string for aplay."""
+    if isinstance(device, str):
+        if device.startswith(("hw:", "plughw:")):
+            return device
+        if device and not device.isdigit():
+            return f"hw:CARD={device},DEV=0"
+    return None
 
 
 class SoundDeviceBackend(_Backend):

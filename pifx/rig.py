@@ -77,7 +77,7 @@ class Rig:
                                        f"for lowest latency run on Raspberry Pi OS Lite or stop PipeWire")
                     log.warning("HAT is held by the desktop audio server; %s", self.audio_note)
             if device is None:
-                device = f"hw:{card.index}"
+                device = f"hw:CARD={card.id},DEV=0"     # direct ALSA via aplay
         try:
             self.engine.start(device=device, sim=sim)
         except Exception as e:  # noqa: BLE001
