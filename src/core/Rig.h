@@ -42,6 +42,7 @@ public:
         std::string input;                  // capture device for the "input" source
         std::string source;                 // startup source: tone | shape | file[:name] | capture[:dev] | silence
         std::string preset;                 // load this preset after start
+        bool hijack = false;                // route system audio through pifx from the start
         bool launchpad = true;
         std::string midiPort;
         bool audio = true;                  // false: timer clock only (tests)
@@ -102,6 +103,10 @@ public:
     Hijack& hijack() { return hijack_; }
     bool startHijack(std::string* err);
     void stopHijack();
+    bool hijackOnStart() const { return settings_.value("hijack_on_start", false); }
+    void setHijackOnStart(bool on);
+    // True for pifx's own virtual outputs (pi-dsp, pifx-hijack): playing to them would feed back.
+    bool isVirtualOutput(const std::string& keyOrName) const;
     bool setOutputs(const std::vector<std::string>& keys, std::string* err);
     bool setBackend(const std::string& name, std::string* err);
     float outputGainDb() const { return outGainDb_; }

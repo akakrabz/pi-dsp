@@ -20,8 +20,10 @@ pick**: the PCM5122 DAC HAT, HDMI, a USB interface, several at once.
   (oscilloscope music, stereo phase), Spectrum (In vs Out per channel), Spectrogram.
 - **Interface-agnostic audio** — PipeWire/PulseAudio, ALSA or JACK backend. Sources are
   tones/sweeps/noise, X-Y shapes, WAV/FLAC/MP3 files, any capture device, or the
-  *monitor* of any output. Play on one or many outputs; **Hijack** reroutes every app on
-  the desktop through pifx and back out of the device you choose.
+  *monitor* of any output. Play on one or many outputs.
+- **System audio** — a permanent PipeWire output called **pi-dsp** that every app
+  (browser, video player, games) plays into; pifx listens to it and sends the sound,
+  through the effects, to the DAC or whatever you pick. See [System audio](#system-audio).
 - **Effects chain** (ported from the Python version, same sound): filter, 3-band EQ,
   drive, tremolo, delay, bitcrush, stutter, reverb, plus master gain and a limiter.
   Presets and tap tempo carry over too. All eight effects together use about 2% of one
@@ -56,8 +58,15 @@ to `config.txt` (the InnoMaker board is electrically an Allo Boss; use
 `~/.local/bin/pifx`.
 
 Options: `--service` (runs `pifx headless` at boot as a systemd *user* service, so it can
-reach PipeWire), `--autostart` (opens the GUI when the desktop starts), `--debug`,
-`--no-overlay`, `--dry-run`.
+reach PipeWire), `--autostart` (opens the GUI when the desktop starts), `--system-audio`
+(the permanent pi-dsp output, [below](#system-audio)), `--debug`, `--no-overlay`,
+`--dry-run`.
+
+To make the Pi a box where *all* sound goes through pifx:
+
+```bash
+./install.sh --system-audio --service
+```
 
 The third-party libraries (Dear ImGui, ImPlot, miniaudio, nlohmann/json, stb) are fetched
 by CMake at pinned versions. Nothing gets installed with pip, and no venv is needed.
@@ -111,10 +120,6 @@ flatten; add a short Delay and a ghost copy appears.
   a clickable overview, seek, loop and gain.
 - **Input**: any capture device. Entries marked **[monitor]** record what an output is
   playing without changing anything ("tap" mode).
-- **Hijack system audio** (PipeWire): creates a virtual output `pifx-hijack`, makes it the
-  default and moves every playing app onto it. pifx records it, runs the effects and plays
-  it wherever you tick. Turning it off restores the previous default and moves the apps
-  back. If pifx crashes mid-hijack, `pifx unhijack` (or the next start) repairs it.
 
 **Signal › Routing**
 - **Backend**: Auto (PipeWire/PulseAudio, then ALSA, then JACK), or force one. Use ALSA
@@ -130,6 +135,41 @@ flatten; add a short Delay and a ghost copy appears.
 The RCA output is line level at **2.1 Vrms**, which is hotter than most consumer gear.
 Feed an amp's FX return, a mixer or monitors, not a guitar input. The 3.5 mm jack has its
 own headphone amp.
+
+### System audio
+
+Keep PipeWire running: it is what browsers and video players talk to. Instead of
+disabling it, give it a dummy output that leads into pifx:
+
+```
+Firefox, mpv, ...  ->  pi-dsp (dummy output, the default)  ->  pifx (scope + effects)  ->  DAC / HDMI / USB
+```
+
+`./install.sh --system-audio` sets this up:
+
+- `~/.config/pipewire/pipewire.conf.d/20-pi-dsp-sink.conf` adds a permanent null sink,
+  node name `pi_dsp`, shown as **pi-dsp**. It exists whether pifx runs or not, so apps
+  never lose their output when pifx restarts.
+- `10-pi-dsp-latency.conf` sets PipeWire's quantum to 256 frames (5.3 ms at 48 kHz), so
+  the extra hop through pifx stays short.
+- The service and the autostart entry run pifx with `--hijack`.
+
+**Signal › System audio › Route all apps through pifx** does the rest: it makes pi-dsp
+the default output, moves the apps already playing onto it, sets the source to its
+monitor and remembers the real output you had before. Tick the DAC under **Play on**.
+**at startup** turns it on every time pifx starts (the same as `--hijack`).
+
+Turning it off, quitting pifx, or `pifx unhijack` after a crash puts the default output
+back and moves the apps there, so the desktop is never left silent. pifx never plays
+into pi-dsp itself (that would be a feedback loop), and it never restores to it: if
+WirePlumber remembered pi-dsp as the default from an earlier run, the real output pifx
+plays on, or the first real one, is used instead.
+
+Without the config file, the same switch creates a temporary sink `pifx-hijack` instead
+and removes it again when you turn it off.
+
+Run either the service or the GUI, not both, or they fight over the routing:
+`systemctl --user stop pifx` before you open the GUI, and `start` it afterwards.
 
 ## 4. Effects, presets, Launchpad
 - Each effect has a lamp (on/off) and its parameters. Right-click a slider to reset it,
@@ -167,6 +207,7 @@ pifx diag                    DAC HAT report, mixer state, outputs
 pifx devices                 outputs, inputs (incl. monitors) with their keys, MIDI ports
 pifx tone 1000 3 --level -12 test tone
 pifx unhijack                restore PipeWire routing after a crash
+pifx --hijack                route all system audio through pifx from the start
 
 --backend auto|pulse|alsa|jack   --output DEV (repeatable, or none)   --input DEV
 --source tone|shape|sweep|noise|file[:name]|capture[:dev]|silence     --preset NAME
@@ -185,7 +226,7 @@ Without a desktop (Pi OS Lite with an HDMI screen) the GUI still runs, straight 
 
 ```bash
 cmake --preset debug && cmake --build --preset debug     # build-debug/
-./build-debug/pifx_tests                                 # 53 tests: DSP, analysis, HAT, Launchpad, rig
+./build-debug/pifx_tests                                 # 58 tests: DSP, analysis, HAT, Launchpad, rig, system audio
 cmake --preset asan && cmake --build --preset asan       # AddressSanitizer + UBSan build
 cmake --preset headless && cmake --build --preset headless   # no SDL/GL needed
 ```
@@ -207,11 +248,11 @@ src/core/            no UI code; everything here is unit-tested
   Sources            tone / shape / file / capture
   Dsp                effects, smoothing, limiter, chain
   Analysis           History, trigger (Sweeper), Density heatmap, FFT, spectrogram
-  Hijack             PipeWire virtual sink via pactl
+  Hijack             system audio: the pi-dsp sink (or a temporary one), default + stream moves via pactl
   Hat, PadMap, Launchpad, Rig (the controller every input goes through)
 src/ui/              ImGui front end: App, ScopeView, Signal/Fx/Pad panels, Theme, Gl
 tests/               unit tests (no framework needed)
-packaging/           systemd user unit, desktop entry, VS Code launch/tasks
+packaging/           systemd user unit, desktop entry, PipeWire pi-dsp config, VS Code launch/tasks
 ```
 
 Threads: each output's audio callback (the clock calls `Engine::render`), one capture
@@ -252,7 +293,11 @@ swapped behind `Density` without touching the UI.
 | card listed but silent on a Pi 5 | append `,slave` to the overlay line |
 | DAC not in *Play on* | with PipeWire running the card belongs to PipeWire: use the PipeWire backend (the default) and tick the DAC there |
 | crackles / underruns in the status bar | `--block 512`; the official 27 W supply; fewer outputs at once (each one adds a drift buffer) |
-| hijack does nothing | Routing › Backend must be PipeWire/PulseAudio; `pactl info` must work for your user |
+| system audio does nothing | Routing › Backend must be PipeWire/PulseAudio; `pactl info` must work for your user |
+| no pi-dsp output | `pactl list short sinks` should list `pi_dsp`; if not, re-run `./install.sh --system-audio` or `systemctl --user restart pipewire pipewire-pulse wireplumber` |
+| browser plays but the scope is flat | the source must be pi-dsp's monitor: System audio › **listen again** |
+| a new app plays straight to the DAC | it picked its own output; choose pi-dsp in the app, or toggle Route all apps off and on |
+| sound twice, or echoes | the service and the GUI are both running: `systemctl --user stop pifx` |
 | desktop silent after a crash | `pifx unhijack` |
 | Launchpad not found | `pifx devices` should list it under MIDI ports; a powered hub helps if its LEDs flicker |
 | GUI won't start over SSH | run `pifx headless`, or `SDL_VIDEODRIVER=kmsdrm pifx` on the Pi's own screen |

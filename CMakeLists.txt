@@ -166,6 +166,7 @@ if(PIFX_TESTS)
     tests/test_analysis.cpp
     tests/test_hat.cpp
     tests/test_launchpad.cpp
+    tests/test_hijack.cpp
     tests/test_rig.cpp)
   target_link_libraries(pifx_tests PRIVATE pifx_core)
   target_include_directories(pifx_tests PRIVATE tests)

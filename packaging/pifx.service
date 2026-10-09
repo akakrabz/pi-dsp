@@ -7,7 +7,7 @@ Wants=pipewire-pulse.service
 
 [Service]
 Type=simple
-ExecStart=__DIR__/build/pifx headless
+ExecStart=__DIR__/build/pifx headless __ARGS__
 Restart=on-failure
 RestartSec=3
 # undo a system-audio hijack if pifx ever dies while holding one

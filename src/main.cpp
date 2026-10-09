@@ -50,6 +50,7 @@ static void usage() {
         "  --input DEV        capture device for the input source\n"
         "  --source S         tone | shape | sweep | noise | file[:name] | capture[:dev] | silence\n"
         "  --preset NAME      load a saved preset at start (slot1..slot8 or a name)\n"
+        "  --hijack           route all system audio through pifx from the start (PipeWire)\n"
         "  --rate HZ          engine sample rate (48000)\n"
         "  --block N          frames per period (256 = 5.3 ms)\n"
         "  --data DIR         settings, presets, padmap.json (default ./data next to the repo)\n"
@@ -196,6 +197,7 @@ int main(int argc, char** argv) {
         else if (a == "--input") opt.input = val("--input");
         else if (a == "--source") opt.source = val("--source");
         else if (a == "--preset") opt.preset = val("--preset");
+        else if (a == "--hijack") opt.hijack = true;
         else if (a == "--rate") opt.sampleRate = std::atoi(val("--rate").c_str());
         else if (a == "--block") opt.block = std::atoi(val("--block").c_str());
         else if (a == "--data") opt.dataDir = val("--data");

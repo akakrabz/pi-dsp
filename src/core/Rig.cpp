@@ -101,6 +101,10 @@ void Rig::start() {
 
     chooseInitialRouting();
     if (!opt_.preset.empty() && !loadPreset(opt_.preset)) notify("preset not found: " + opt_.preset);
+    if (opt_.audio && (opt_.hijack || hijackOnStart())) {
+        std::string err;
+        if (!startHijack(&err)) notify("system audio: " + err);
+    }
 
     if (opt_.launchpad) {
         lp_ = std::make_unique<LaunchpadManager>(opt_.midiPort);
@@ -116,10 +120,11 @@ void Rig::chooseInitialRouting() {
     }
     if (opt_.outputsGiven) {
         for (const auto& k : opt_.outputs)
-            if (k != "none") keys.push_back(k);
+            if (k != "none" && !isVirtualOutput(k)) keys.push_back(k);
     } else if (settings_.contains("outputs") && settings_["outputs"].is_array()) {
         for (const auto& k : settings_["outputs"])
-            if (k.is_string() && k.get<std::string>() != "none" && io_->findPlayback(k.get<std::string>()))
+            if (k.is_string() && k.get<std::string>() != "none" && io_->findPlayback(k.get<std::string>()) &&
+                !isVirtualOutput(k.get<std::string>()))
                 keys.push_back(k.get<std::string>());
         if (keys.empty() && !settings_["outputs"].empty() && settings_["outputs"][0] == "none") {
             io_->setOutputs({}, nullptr);
@@ -135,10 +140,13 @@ void Rig::chooseInitialRouting() {
                     break;
                 }
         }
+        // (never one of our own virtual outputs, even when it is the system default)
         if (keys.empty())
             for (const auto& d : io_->playback())
-                if (d.isDefault) { keys.push_back(d.key); break; }
-        if (keys.empty() && !io_->playback().empty()) keys.push_back(io_->playback()[0].key);
+                if (d.isDefault && !isVirtualOutput(d.key)) { keys.push_back(d.key); break; }
+        if (keys.empty())
+            for (const auto& d : io_->playback())
+                if (!isVirtualOutput(d.key)) { keys.push_back(d.key); break; }
     }
     std::string err;
     io_->setOutputs(keys, &err);
@@ -391,7 +399,7 @@ bool Rig::useCapture(const std::string& key, std::string* err) {
     if (!src) return false;
     captureKey_ = key;
     engine_->setSource(src.release());
-    if (key != Hijack::kMonitor) {
+    if (!Hijack::isVirtualSink(key)) {
         settings_["input"] = key;
         saveSettings();
     }
@@ -404,21 +412,34 @@ bool Rig::startHijack(std::string* err) {
         if (err) *err = "hijack needs the PipeWire/PulseAudio backend (Routing > Backend)";
         return false;
     }
-    if (!hijack_.start(err)) return false;
+    auto outs = io_->outputKeys();
+    if (!hijack_.start(err, outs.empty() ? "" : outs[0])) return false;
     io_->refresh();
-    if (!useCapture(Hijack::kMonitor, err)) {
+    if (!useCapture(hijack_.monitor(), err)) {
         hijack_.stop();
         io_->refresh();
         return false;
     }
-    notify(format("hijacked system audio: %d stream(s) moved; new streams follow automatically", hijack_.movedStreams()));
-    if (io_->outputKeys().empty()) notify("no output selected - pick one under Routing to hear it");
+    notify(format("system audio now runs through pifx (%s output, %d stream(s) moved; new ones follow)",
+                  hijack_.permanent() ? "permanent pi-dsp" : "temporary pifx-hijack", hijack_.movedStreams()));
+    if (outs.empty()) notify("no output selected - pick one under Routing to hear it");
     return true;
 }
 
+void Rig::setHijackOnStart(bool on) {
+    settings_["hijack_on_start"] = on;
+    saveSettings();
+}
+
+bool Rig::isVirtualOutput(const std::string& k) const {
+    if (Hijack::isVirtualSink(k)) return true;
+    const DeviceInfo* d = io_->findPlayback(k);
+    return d && (Hijack::isVirtualSink(d->key) || Hijack::isVirtualSink(d->name));
+}
+
 void Rig::stopHijack() {
-    if (capture() && captureKey_ == Hijack::kMonitor)
-        engine_->retire(engine_->source());   // close our capture stream before the sink disappears
+    if (capture() && Hijack::isVirtualSink(captureKey_))
+        engine_->retire(engine_->source());   // close our capture stream before the sink goes away
     hijack_.stop();
     if (io_) io_->refresh();
     setTone(tone_);
@@ -427,8 +448,8 @@ void Rig::stopHijack() {
 bool Rig::setOutputs(const std::vector<std::string>& keys, std::string* err) {
     std::vector<std::string> k;
     for (const auto& s : keys) {
-        if (s == Hijack::kSink) {
-            notify("skipped pifx-hijack as an output (it would feed back into itself)");
+        if (isVirtualOutput(s)) {
+            notify("skipped " + s + " as an output (it is pifx's own input: it would feed back into itself)");
             continue;
         }
         k.push_back(s);
@@ -453,10 +474,10 @@ bool Rig::setBackend(const std::string& name, std::string* err) {
     settings_["backend"] = name;
     std::vector<std::string> keys;
     for (const auto& k : prev)
-        if (io_->findPlayback(k)) keys.push_back(k);
+        if (io_->findPlayback(k) && !isVirtualOutput(k)) keys.push_back(k);
     if (keys.empty())
         for (const auto& d : io_->playback())
-            if (d.isDefault) { keys.push_back(d.key); break; }
+            if (d.isDefault && !isVirtualOutput(d.key)) { keys.push_back(d.key); break; }
     std::string e2;
     io_->setOutputs(keys, &e2);
     if (!e2.empty()) notify(e2);

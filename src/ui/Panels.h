@@ -17,6 +17,7 @@ public:
 
 private:
     void drawSource(Rig& rig);
+    void drawSystemAudio(Rig& rig);
     void drawRouting(Rig& rig);
     void drawDac(Rig& rig);
     void drawFile(Rig& rig);

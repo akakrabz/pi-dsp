@@ -52,6 +52,7 @@ static std::string mmss(double s) {
 
 void SignalPanel::draw(Rig& rig) {
     drawSource(rig);
+    drawSystemAudio(rig);
     drawRouting(rig);
     drawDac(rig);
 }
@@ -213,11 +214,18 @@ void SignalPanel::drawCapture(Rig& rig) {
         if (ImGui::SliderFloat("Gain", &g, -40, 40, "%.1f dB")) c->gainDb.store(g);
         ImGui::TextDisabled("%s   under %u  over %u", c->deviceName().c_str(), c->underruns.load(), c->overruns.load());
     }
-    ImGui::Spacing();
+}
+
+// ---------------------------------------------------------------- system audio
+void SignalPanel::drawSystemAudio(Rig& rig) {
+    sectionHeader("SYSTEM AUDIO");
+    AudioIO& io = rig.io();
     Hijack& hj = rig.hijack();
+    bool permanentSink = false;
+    for (const auto& d : io.playback()) permanentSink |= d.key == Hijack::kPersistentSink;
     bool on = hj.active();
     ImGui::BeginDisabled(!io.isPulse() && !on);
-    if (ImGui::Checkbox("Hijack system audio", &on)) {
+    if (ImGui::Checkbox("Route all apps through pifx", &on)) {
         std::string err;
         if (on) {
             if (!rig.startHijack(&err)) rig.notify(err);
@@ -225,13 +233,32 @@ void SignalPanel::drawCapture(Rig& rig) {
             rig.stopHijack();
         }
     }
+    helpMarker("Makes pifx's dummy output the system default and moves every playing app onto it (browser, "
+               "video, music...). pifx records it, runs it through the effects and plays it on the outputs "
+               "ticked under Routing. Turning it off, or quitting pifx, puts the previous default back.\n\n"
+               "With the permanent 'pi-dsp' output (install.sh --system-audio) the dummy output always exists "
+               "and shows up in the desktop's sound menu; otherwise pifx creates a temporary one.\n\n"
+               "Needs the PipeWire/PulseAudio backend and pactl.");
+    bool atStart = rig.hijackOnStart();
+    if (ImGui::Checkbox("at startup", &atStart)) rig.setHijackOnStart(atStart);
     ImGui::EndDisabled();
-    helpMarker("Makes a virtual 'pifx-hijack' output the system default and moves every playing app onto it. "
-               "pifx records it, runs it through the effects and plays it on the outputs you pick below. "
-               "Turning it off puts everything back.\n\nNeeds the PipeWire/PulseAudio backend and pactl.");
-    if (!io.isPulse()) ImGui::TextDisabled("switch Routing > Backend to PipeWire to hijack");
-    if (hj.active())
-        ImGui::TextColored(theme::kWarn, "hijacked (was: %s)", hj.previousSink().empty() ? "?" : hj.previousSink().c_str());
+    if (!io.isPulse()) {
+        ImGui::TextDisabled("needs Routing > Backend: PipeWire");
+    } else if (hj.active()) {
+        ImGui::TextColored(theme::kAccent, "apps -> %s -> pifx -> outputs", hj.permanent() ? "pi-dsp" : "pifx-hijack");
+        if (!(rig.capture() && Hijack::isVirtualSink(rig.captureKey()))) {
+            ImGui::TextColored(theme::kWarn, "apps are muted: the source is not system audio");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("listen again")) {
+                std::string err;
+                if (!rig.useCapture(hj.monitor(), &err)) rig.notify(err);
+            }
+        }
+        ImGui::TextDisabled("restores %s when off", hj.previousSink().empty() ? "nothing (no other output)" : hj.previousSink().c_str());
+        if (io.outputKeys().empty()) ImGui::TextColored(theme::kWarn, "no output ticked: you will hear nothing");
+    } else {
+        ImGui::TextDisabled(permanentSink ? "permanent pi-dsp output: ready" : "no permanent pi-dsp output (temporary one is used)");
+    }
 }
 
 // ---------------------------------------------------------------- routing
@@ -255,7 +282,7 @@ void SignalPanel::drawRouting(Rig& rig) {
     ImGui::Spacing();
     ImGui::TextUnformatted("Play on");
     for (const auto& d : io.playback()) {
-        if (d.key == Hijack::kSink) continue;
+        if (Hijack::isVirtualSink(d.key) || Hijack::isVirtualSink(d.name)) continue;   // pifx's own inputs
         auto it = std::find(keys.begin(), keys.end(), d.key);
         bool on = it != keys.end();
         ImGui::PushID(d.key.c_str());

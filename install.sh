@@ -5,6 +5,8 @@
 #   ./install.sh                  packages + DAC overlay + release build
 #   ./install.sh --service        ... and run `pifx headless` at boot (systemd user service)
 #   ./install.sh --autostart      ... and open the GUI when the desktop session starts
+#   ./install.sh --system-audio   permanent "pi-dsp" output that every app plays into, and
+#                                 pifx starts with all system audio routed through it
 #   ./install.sh --debug          debug build (for gdb / VS Code)
 #   ./install.sh --overlay hifiberry-dacplus     a different DAC overlay
 #   ./install.sh --no-overlay     leave config.txt alone (other DACs, not a Pi)
@@ -13,17 +15,18 @@
 set -euo pipefail
 
 OVERLAY="allo-boss-dac-pcm512x-audio"   # InnoMaker HiFi DAC HAT (PCM5122 as clock master)
-DO_OVERLAY=1 SERVICE=0 AUTOSTART=0 DRY=0 APT=1 BUILD_TYPE=Release
+DO_OVERLAY=1 SERVICE=0 AUTOSTART=0 SYSTEM_AUDIO=0 DRY=0 APT=1 BUILD_TYPE=Release
 while [ $# -gt 0 ]; do
   case "$1" in
     --overlay) OVERLAY="$2"; shift ;;
     --no-overlay) DO_OVERLAY=0 ;;
     --service) SERVICE=1 ;;
     --autostart) AUTOSTART=1 ;;
+    --system-audio) SYSTEM_AUDIO=1 ;;
     --debug) BUILD_TYPE=Debug ;;
     --dry-run) DRY=1 ;;
     --no-apt) APT=0 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -83,15 +86,31 @@ fi
 run mkdir -p "$HOME/.local/bin"
 run ln -sf "$HERE/build/pifx" "$HOME/.local/bin/pifx"
 
-# ---- 5. start at boot ---------------------------------------------------------------
+# ---- 5. system audio through pifx --------------------------------------------------
+PIFX_ARGS=""
+if [ "$SYSTEM_AUDIO" = 1 ]; then
+  PW_DIR="$HOME/.config/pipewire/pipewire.conf.d"
+  echo "installing the permanent pi-dsp output and smaller PipeWire buffers into $PW_DIR"
+  run mkdir -p "$PW_DIR"
+  run cp "$HERE/packaging/pipewire/20-pi-dsp-sink.conf" "$HERE/packaging/pipewire/10-pi-dsp-latency.conf" "$PW_DIR/"
+  if [ "$DRY" = 0 ]; then
+    systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null \
+      && echo "PipeWire restarted: 'pi-dsp' should now be listed by: pactl list short sinks" \
+      || echo "could not restart PipeWire from here: log out and back in (or reboot) to load pi-dsp"
+  fi
+  PIFX_ARGS="--hijack"
+fi
+
+# ---- 6. start at boot ---------------------------------------------------------------
 if [ "$SERVICE" = 1 ]; then
   UNIT_DIR="$HOME/.config/systemd/user"
   echo "installing $UNIT_DIR/pifx.service (runs as $RUN_USER so it can reach PipeWire)"
   if [ "$DRY" = 0 ]; then
     mkdir -p "$UNIT_DIR"
-    sed -e "s|__DIR__|$HERE|g" "$HERE/packaging/pifx.service" > "$UNIT_DIR/pifx.service"
+    sed -e "s|__DIR__|$HERE|g" -e "s|__ARGS__|$PIFX_ARGS|g" "$HERE/packaging/pifx.service" > "$UNIT_DIR/pifx.service"
     systemctl --user daemon-reload
-    systemctl --user enable --now pifx.service
+    systemctl --user enable pifx.service
+    systemctl --user restart pifx.service     # picks up new arguments on a re-run
     sudo loginctl enable-linger "$RUN_USER"     # start at boot, before anyone logs in
   fi
 fi
@@ -99,7 +118,7 @@ if [ "$AUTOSTART" = 1 ]; then
   echo "installing ~/.config/autostart/pifx.desktop"
   if [ "$DRY" = 0 ]; then
     mkdir -p "$HOME/.config/autostart" "$HOME/.local/share/applications"
-    sed -e "s|__DIR__|$HERE|g" "$HERE/packaging/pifx.desktop" > "$HOME/.config/autostart/pifx.desktop"
+    sed -e "s|__DIR__|$HERE|g" -e "s|__ARGS__|$PIFX_ARGS|g" "$HERE/packaging/pifx.desktop" > "$HOME/.config/autostart/pifx.desktop"
     cp "$HOME/.config/autostart/pifx.desktop" "$HOME/.local/share/applications/pifx.desktop"
   fi
 fi
@@ -110,5 +129,8 @@ echo "== done"
 [ "$CHANGED" = 0 ] && echo "check the HAT with:   pifx diag"
 echo "run:                 pifx            (GUI)      pifx headless      pifx --help"
 [ "$SERVICE" = 1 ] && echo "service log:         journalctl --user -u pifx -f"
+if [ "$SYSTEM_AUDIO" = 1 ] && [ "$SERVICE" = 0 ] && [ "$AUTOSTART" = 0 ]; then
+  echo "system audio:        run 'pifx --hijack', or tick Signal > System audio > at startup"
+fi
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: add ~/.local/bin to PATH, or run $HERE/build/pifx" ;; esac
 exit 0
