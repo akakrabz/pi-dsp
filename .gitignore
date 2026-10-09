@@ -1,6 +1,21 @@
+# builds
+build/
+build-*/
+.cache/
+compile_commands.json
+
+# per-machine state written by pifx
+data/settings.json
+data/imgui.ini
+data/hijack.json
+data/padmap.json
+data/presets/*.json
+media/*.wav
+media/*.flac
+media/*.mp3
+!media/README.txt
+
+# editors (the shared VS Code config lives in packaging/vscode) / python leftovers
+.vscode/
 __pycache__/
 *.pyc
-data/presets/*.json
-data/padmap.json
-media/*.wav
-tests/shots/

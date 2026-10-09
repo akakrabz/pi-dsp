@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=pifx
+Comment=Waveform scope, audio router and effects box
+Exec=__DIR__/build/pifx
+Path=__DIR__
+Icon=audio-card
+Terminal=false
+Categories=AudioVideo;Audio;

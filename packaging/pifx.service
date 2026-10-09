@@ -1,0 +1,21 @@
+# systemd *user* unit (installed by ./install.sh --service into ~/.config/systemd/user).
+# A user service, not a system one: it has to reach the user's PipeWire session.
+[Unit]
+Description=pifx headless - audio engine, effects and Launchpad without a window
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+ExecStart=__DIR__/build/pifx headless
+Restart=on-failure
+RestartSec=3
+# undo a system-audio hijack if pifx ever dies while holding one
+ExecStopPost=__DIR__/build/pifx unhijack
+# only matters when routed through PipeWire: ask for a small quantum
+Environment=PIPEWIRE_LATENCY=256/48000
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

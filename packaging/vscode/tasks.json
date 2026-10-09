@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "configure debug",
+      "type": "shell",
+      "command": "cmake --preset debug",
+      "problemMatcher": []
+    },
+    {
+      "label": "build debug",
+      "type": "shell",
+      "command": "cmake --preset debug >/dev/null && cmake --build --preset debug",
+      "group": {"kind": "build", "isDefault": true},
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "build release",
+      "type": "shell",
+      "command": "cmake --preset release >/dev/null && cmake --build --preset release",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "cmake --build --preset debug && ./build-debug/pifx_tests",
+      "group": "test",
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
