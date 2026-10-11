@@ -21,7 +21,7 @@ endif()
 
 option(PIFX_GUI   "Build the ImGui front end (needs SDL2 + OpenGL ES 3)" ON)
 option(PIFX_TESTS "Build the unit tests (ctest)" ON)
-option(PIFX_NATIVE "Tune for the build machine (-mcpu=native)" OFF)
+option(PIFX_NATIVE "Tune for the build machine (-mcpu/-march=native)" OFF)
 
 find_package(Threads REQUIRED)
 if(POLICY CMP0169)
@@ -79,7 +79,12 @@ target_include_directories(pifx_core PUBLIC src
 target_compile_definitions(pifx_core PUBLIC PIFX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(pifx_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS} m)
 if(PIFX_NATIVE)
-  target_compile_options(pifx_core PUBLIC -mcpu=native)
+  # ARM spells it -mcpu, x86 -march
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm)")
+    target_compile_options(pifx_core PUBLIC -mcpu=native)
+  else()
+    target_compile_options(pifx_core PUBLIC -march=native)
+  endif()
 endif()
 # miniaudio is big and warns a lot; keep our own code clean.
 set_source_files_properties(src/core/miniaudio_impl.c PROPERTIES COMPILE_OPTIONS "-w")
